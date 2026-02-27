@@ -422,14 +422,14 @@ fn main() {
                     Arg::new("build_beam_width")
                         .long("build_beam_width")
                         // bump a bit vs 128 for high-dim u16 sketches
-                        .default_value("512")
+                        .default_value("1024")
                         .value_parser(clap::value_parser!(usize))
                         .action(ArgAction::Set),
                 )
                 .arg(
                     Arg::new("alpha")
                         .long("alpha")
-                        .default_value("1.8")
+                        .default_value("1.2")
                         .value_parser(clap::value_parser!(f32))
                         .action(ArgAction::Set),
                 )
