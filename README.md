@@ -14,13 +14,17 @@ cargo build --release
 
 ## usage
 ```bash
+$ sake -h
+
+ ************** initializing logger *****************
+
 lightning-fast and space-efficient genome search index based on DiskANN and b-bit One Permutation MinHash
 
 Usage: sake <COMMAND>
 
 Commands:
-  todiskann  Build DiskANN index from genome sketches
-  search     Search query genomes against an existing DiskANN index
+  todiskann  Build DiskANN index from genomes, genomes will be sketched first
+  search     Search query genomes against an existing DiskANN index, query genomes will be sketched first
   help       Print this message or the help of the given subcommand(s)
 
 Options:
