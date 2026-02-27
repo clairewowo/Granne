@@ -490,7 +490,7 @@ fn main() {
                         .long("beam_width")
                         .help("Search beam width")
                         // default reasonably large; override if needed
-                        .default_value("512")
+                        .default_value("8192")
                         .value_parser(clap::value_parser!(usize))
                         .action(ArgAction::Set),
                 )
