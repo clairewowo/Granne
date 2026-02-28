@@ -22,17 +22,27 @@ use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::str::FromStr;
 use std::sync::Once;
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
+// DNA / base k-mer machinery
 use kmerutils::base::{
     alphabet::Alphabet2b,
-    kmergenerator::*,
+    kmergenerator::{KmerGenerationPattern, KmerGenerator},
     sequence::Sequence as SequenceStruct,
     CompressedKmerT, Kmer16b32bit, Kmer32bit, Kmer64bit, KmerBuilder,
 };
 use kmerutils::sketcharg::{DataType, SeqSketcherParams, SketchAlgo};
 use kmerutils::sketching::setsketchert::{OptDensHashSketch, RevOptDensHashSketch, SeqSketcherT};
+
+// Amino-acid k-mers and AA sketchers (AA-specific generator + pattern)
+use kmerutils::aautils::kmeraa::{
+    KmerAA32bit, KmerAA64bit, KmerGenerator as AAKmerGenerator,
+    KmerGenerationPattern as AAKmerGenerationPattern, SequenceAA,
+};
+use kmerutils::aautils::setsketchert as aasketch;
+use kmerutils::aautils::setsketchert::SeqSketcherAAT;
 
 use anndists::dist::DistHamming;
 use rust_diskann::{DiskANN, DiskAnnParams};
@@ -54,6 +64,12 @@ fn ascii_to_seq(bases: &[u8]) -> Result<SequenceStruct, ()> {
     let mut seq = SequenceStruct::with_capacity(2, bases.len());
     seq.encode_and_add(bases, &alphabet);
     Ok(seq)
+}
+
+/// Converts ASCII-encoded amino-acid sequence into `SequenceAA`.
+fn ascii_to_seq_aa(bases: &[u8]) -> Result<SequenceAA, ()> {
+    let s = std::str::from_utf8(bases).map_err(|_| ())?;
+    SequenceAA::from_str(s).map_err(|_| ())
 }
 
 /// Read lines (one path per line) from a text file.
@@ -100,12 +116,15 @@ struct PrefixParams {
     densification: usize, // 0 optdens, 1 revoptdens
     threads: usize,
 
+    // DNA vs AA
+    seq_type: String, // "dna" or "aa"
+
     // diskann params
     max_degree: usize,
     build_beam_width: usize,
     alpha: f32,
-    passes: usize,       
-    extra_seeds: usize, 
+    passes: usize,
+    extra_seeds: usize,
 
     // type info (we fix u16)
     sketch_elem_size: u8,
@@ -142,7 +161,7 @@ fn load_params(prefix: &str) -> io::Result<PrefixParams> {
 /// Strict, order-preserving parallel sketching:
 /// returns Vec<Vec<u16>> aligned to `file_paths` order.
 ///
-/// IMPORTANT: we REQUIRE Sketcher::Sig = u16 at compile time.
+/// IMPORTANT: we REQUIRE Sketcher::Sig = u16 at compile time (for DNA).
 fn sketch_files_ordered_u16<Kmer, Sketcher, F>(
     file_paths: &[String],
     sketcher: &Sketcher,
@@ -152,9 +171,7 @@ where
     Kmer: CompressedKmerT + KmerBuilder<Kmer> + Send + Sync,
     <Kmer as CompressedKmerT>::Val: num::PrimInt + Send + Sync + std::fmt::Debug,
     KmerGenerator<Kmer>: KmerGenerationPattern<Kmer>,
-
     Sketcher: SeqSketcherT<Kmer, Sig = u16> + Sync,
-
     F: Fn(&Kmer) -> <Kmer as CompressedKmerT>::Val + Send + Sync + Copy,
 {
     // We keep a local Vec<(original_index, signature)> and then sort by index
@@ -178,6 +195,55 @@ where
 
             // returns Vec<Vec<u16>>, and for "seqs" interface inner vec has size 1
             let signature = sketcher.sketch_compressedkmer_seqs(&sequences_ref, kmer_hash_fn);
+            let sig_u16 = signature
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| panic!("sketcher returned empty signature for {path}"));
+
+            (i, sig_u16)
+        })
+        .collect();
+
+    indexed.sort_by_key(|(i, _)| *i);
+    indexed.into_iter().map(|(_, v)| v).collect()
+}
+
+/// Strict, order-preserving parallel AA sketching (Sig = u16).
+/// Returns Vec<Vec<u16>> aligned to `file_paths` order.
+fn sketch_files_ordered_aa_u16<Kmer, Sketcher, F>(
+    file_paths: &[String],
+    sketcher: &Sketcher,
+    kmer_hash_fn: F,
+) -> Vec<Vec<u16>>
+where
+    Kmer: CompressedKmerT + KmerBuilder<Kmer> + Send + Sync,
+    <Kmer as CompressedKmerT>::Val: num::PrimInt + Send + Sync + std::fmt::Debug,
+    // *** AA-specific generator + pattern bound (this fixes E0277) ***
+    AAKmerGenerator<Kmer>: AAKmerGenerationPattern<Kmer>,
+    Sketcher: SeqSketcherAAT<Kmer, Sig = u16> + Sync,
+    F: Fn(&Kmer) -> <Kmer as CompressedKmerT>::Val + Send + Sync + Copy,
+{
+    let mut indexed: Vec<(usize, Vec<u16>)> = file_paths
+        .par_iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let mut sequences: Vec<SequenceAA> = Vec::new();
+            let mut reader =
+                parse_fastx_file(path).unwrap_or_else(|e| panic!("Invalid FASTA/Q {path}: {e}"));
+
+            while let Some(record) = reader.next() {
+                let rec = record.unwrap_or_else(|e| panic!("Error reading record in {path}: {e}"));
+                // For AA we do NOT normalize as DNA; use raw sequence bytes.
+                let seq_bytes = rec.seq();
+                let seq = ascii_to_seq_aa(&seq_bytes)
+                    .unwrap_or_else(|_| panic!("AA parse error in {path}"));
+                sequences.push(seq);
+            }
+
+            let sequences_ref: Vec<&SequenceAA> = sequences.iter().collect();
+
+            // AA sketcher interface: sketch_compressedkmeraa_seqs
+            let signature = sketcher.sketch_compressedkmeraa_seqs(&sequences_ref, kmer_hash_fn);
             let sig_u16 = signature
                 .get(0)
                 .cloned()
@@ -234,8 +300,47 @@ where
     }
 }
 
+/// Amino-acid packed k-mer hashing (no reverse-complement).
+/// AA alphabet needs 5 bits (2^5 = 32) for 20 residues.
+pub fn make_xxh3_aa_kmer_hash_fn<Kmer>(
+    seed: u64,
+) -> impl Fn(&Kmer) -> Kmer::Val + Copy + Send + Sync
+where
+    Kmer: CompressedKmerT + KmerBuilder<Kmer>,
+    Kmer::Val: PrimInt + NumCast + ToPrimitive,
+{
+    const AA_BITS_PER_RESIDUE: usize = 5;
+
+    move |kmer: &Kmer| -> Kmer::Val {
+        let k: usize = kmer.get_nb_base() as usize;
+        let bits: usize = AA_BITS_PER_RESIDUE * k;
+
+        let mask_u64: u64 = if bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << bits) - 1
+        };
+
+        let packed_u64: u64 = kmer
+            .get_compressed_value()
+            .to_u64()
+            .expect("Kmer::Val must be convertible to u64")
+            & mask_u64;
+
+        let h64: u64 = xxh3_64_with_seed(&packed_u64.to_le_bytes(), seed);
+
+        let out_u64 = if std::mem::size_of::<Kmer::Val>() <= 4 {
+            (h64 as u32) as u64
+        } else {
+            h64
+        };
+
+        NumCast::from(out_u64).expect("cast to Kmer::Val must succeed")
+    }
+}
+
 /// Dispatch sketching by k-mer size.
-/// Fixed Sig=u16 for the sketcher output.
+/// Fixed Sig=u16 for the sketcher output (DNA).
 fn sketch_with_kmer_dispatch_u16(
     paths: &[String],
     kmer_size: usize,
@@ -294,6 +399,57 @@ fn sketch_with_kmer_dispatch_u16(
         }
     } else {
         panic!("kmer_size cannot exceed 32 and must not be 15!");
+    }
+}
+
+/// Amino-acid k-mer dispatcher (Sig = u16).
+/// AA k must be <= 12 (KmerAA32bit for k<=6, KmerAA64bit for 7..=12).
+fn sketch_aa_with_kmer_dispatch_u16(
+    paths: &[String],
+    kmer_size: usize,
+    sketch_size: usize,
+    densification: usize, // 0 optdens, 1 revoptdens
+    hash_seed: u64,
+) -> Vec<Vec<u16>> {
+    let sketch_args = SeqSketcherParams::new(
+        kmer_size,
+        sketch_size,
+        SketchAlgo::OPTDENS, // label; actual controlled by sketcher type
+        DataType::AA,
+    );
+
+    if kmer_size <= 6 {
+        let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA32bit>(hash_seed);
+
+        match densification {
+            0 => {
+                let sketcher = aasketch::OptDensHashSketch::<KmerAA32bit, f32>::new(&sketch_args);
+                sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
+            }
+            1 => {
+                let sketcher =
+                    aasketch::RevOptDensHashSketch::<KmerAA32bit, f32>::new(&sketch_args);
+                sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
+            }
+            _ => panic!("densification must be 0 or 1"),
+        }
+    } else if kmer_size <= 12 {
+        let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA64bit>(hash_seed);
+
+        match densification {
+            0 => {
+                let sketcher = aasketch::OptDensHashSketch::<KmerAA64bit, f32>::new(&sketch_args);
+                sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
+            }
+            1 => {
+                let sketcher =
+                    aasketch::RevOptDensHashSketch::<KmerAA64bit, f32>::new(&sketch_args);
+                sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
+            }
+            _ => panic!("densification must be 0 or 1"),
+        }
+    } else {
+        panic!("kmer_size for amino acids must be <= 12");
     }
 }
 
@@ -409,8 +565,16 @@ fn main() {
                     Arg::new("threads")
                         .long("threads")
                         .short('t')
-                        .default_value("1")
+                        .help("Number of threads, default all logical cores")
                         .value_parser(clap::value_parser!(usize))
+                        .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("seq_type")
+                        .long("seq_type")
+                        .help("Sequence type: dna (nucleotide) or aa (amino-acid)")
+                        .value_parser(["dna", "aa"])
+                        .default_value("dna")
                         .action(ArgAction::Set),
                 )
                 .arg(
@@ -498,8 +662,7 @@ fn main() {
                     Arg::new("threads")
                         .long("threads")
                         .short('t')
-                        .help("Threads for sketching/search")
-                        .default_value("1")
+                        .help("Threads for sketching/search, default all logical cores")
                         .value_parser(clap::value_parser!(usize))
                         .action(ArgAction::Set),
                 )
@@ -522,7 +685,15 @@ fn main() {
             let kmer_size = *m.get_one::<usize>("kmer_size").unwrap();
             let sketch_size = *m.get_one::<usize>("sketch_size").unwrap();
             let dens = *m.get_one::<usize>("densification").unwrap();
-            let threads = *m.get_one::<usize>("threads").unwrap();
+            let threads = m
+                .get_one::<usize>("threads")
+                .cloned()
+                .unwrap_or_else(|| num_cpus::get());
+
+            let seq_type = m
+                .get_one::<String>("seq_type")
+                .unwrap()
+                .to_lowercase(); // "dna" or "aa"
 
             let max_degree = *m.get_one::<usize>("max_degree").unwrap();
             let build_beam_width = *m.get_one::<usize>("build_beam_width").unwrap();
@@ -535,8 +706,9 @@ fn main() {
 
             let ref_genomes = read_list_file(&reference_list);
             eprintln!(
-                "Building index for {} reference genomes (k={}, sketch_size={}, dens={}, seed={}, passes={}, extra_seeds={})",
+                "Building index for {} reference genomes (seq_type={}, k={}, sketch_size={}, dens={}, seed={}, passes={}, extra_seeds={})",
                 ref_genomes.len(),
+                seq_type,
                 kmer_size,
                 sketch_size,
                 dens,
@@ -550,13 +722,24 @@ fn main() {
             write_genome_list(&genomes_file, &ref_genomes).expect("failed writing genomes list");
 
             // Sketch reference genomes (order preserved)
-            let vectors_u16 = sketch_with_kmer_dispatch_u16(
-                &ref_genomes,
-                kmer_size,
-                sketch_size,
-                dens,
-                hash_seed,
-            );
+            let vectors_u16 = match seq_type.as_str() {
+                "dna" => sketch_with_kmer_dispatch_u16(
+                    &ref_genomes,
+                    kmer_size,
+                    sketch_size,
+                    dens,
+                    hash_seed,
+                ),
+                "aa" => sketch_aa_with_kmer_dispatch_u16(
+                    &ref_genomes,
+                    kmer_size,
+                    sketch_size,
+                    dens,
+                    hash_seed,
+                ),
+                other => panic!("Unknown seq_type: {other} (must be 'dna' or 'aa')"),
+            };
+
             assert_eq!(
                 vectors_u16.len(),
                 ref_genomes.len(),
@@ -602,6 +785,7 @@ fn main() {
                 sketch_size,
                 densification: dens,
                 threads,
+                seq_type: seq_type.clone(),
                 max_degree,
                 build_beam_width,
                 alpha,
@@ -612,6 +796,7 @@ fn main() {
                 distance: "anndists::dist::DistHamming".to_string(),
                 hash_seed,
             };
+
             save_params(&prefix, &pp).expect("failed writing params");
 
             // Write idmap.tsv using the same genome order
@@ -674,13 +859,24 @@ fn main() {
             eprintln!("Sketching {} query genomes…", query_genomes.len());
 
             // Sketch queries (order preserved; match params)
-            let query_vectors_u16 = sketch_with_kmer_dispatch_u16(
-                &query_genomes,
-                pp.kmer_size,
-                pp.sketch_size,
-                pp.densification,
-                pp.hash_seed,
-            );
+            let query_vectors_u16 = match pp.seq_type.as_str() {
+                "dna" => sketch_with_kmer_dispatch_u16(
+                    &query_genomes,
+                    pp.kmer_size,
+                    pp.sketch_size,
+                    pp.densification,
+                    pp.hash_seed,
+                ),
+                "aa" => sketch_aa_with_kmer_dispatch_u16(
+                    &query_genomes,
+                    pp.kmer_size,
+                    pp.sketch_size,
+                    pp.densification,
+                    pp.hash_seed,
+                ),
+                other => panic!("Unknown seq_type in params: {other} (must be 'dna' or 'aa')"),
+            };
+
             if !query_vectors_u16.is_empty() {
                 eprintln!(
                     "Query vector dim={} (must match index dim={})",
