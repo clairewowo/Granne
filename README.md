@@ -6,7 +6,7 @@ Granne (***GR***aph-based ***A***pproximate ***N***earest ***NE***ighbor, it mea
 ## Install
 ```bash
 git clone https://github.com/jianshu93/Granne
-cd Sake
+cd Granne
 cargo build --release
 ./target/release/granne -h
 ```
