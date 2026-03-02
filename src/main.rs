@@ -526,8 +526,8 @@ fn main() {
     println!("\n ************** initializing logger *****************\n");
     let _ = env_logger::Builder::from_default_env().try_init();
 
-    let matches = Command::new("sake")
-        .version("0.2.0")
+    let matches = Command::new("granne")
+        .version("0.2.2")
         .about("lightning-fast and space-efficient genome search index based on DiskANN and b-bit One Permutation MinHash")
         .subcommand_required(true)
         .subcommand(
