@@ -528,7 +528,7 @@ fn main() {
 
     let matches = Command::new("granne")
         .version("0.2.2")
-        .about("lightning-fast and space-efficient genome search index based on DiskANN and b-bit One Permutation MinHash")
+        .about("granne: graph-based approximiate nearest neighbor, a lightning-fast and space-efficient genome search index")
         .subcommand_required(true)
         .subcommand(
             Command::new("todiskann")
