@@ -367,7 +367,7 @@ fn sketch_with_kmer_dispatch_u16(
 ) -> Vec<Vec<u16>> {
 
     let sketch_args;
-    if vector_alg == "m" {
+    if vector_alg == "minhash" {
         sketch_args = SeqSketcherParams::new(
             kmer_size,
             sketch_size,
@@ -468,13 +468,25 @@ fn sketch_aa_with_kmer_dispatch_u16(
     densification: usize, // 0 optdens, 1 revoptdens
     hash_seed: u64,
 ) -> Vec<Vec<u16>> {
-    let sketch_args = SeqSketcherParams::new(
-        kmer_size,
-        sketch_size,
-        SketchAlgo::OPTDENS, // label; actual controlled by sketcher type
-        DataType::AA,
-    );
 
+    let sketch_args;
+    if vector_alg == "minhash" {
+        sketch_args = SeqSketcherParams::new(
+            kmer_size,
+            sketch_size,
+            SketchAlgo::OPTDENS, // label; actual is controlled by sketcher type
+            DataType::AA,
+        );
+    }
+    else {
+        sketch_args = SeqSketcherParams::new(
+            kmer_size,
+            sketch_size,
+            SketchAlgo::HLL, // label; actual is controlled by sketcher type
+            DataType::AA,
+        );
+    }
+    
     if kmer_size <= 6 {
         let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA32bit>(hash_seed);
         if vector_alg == "setsketch" {
