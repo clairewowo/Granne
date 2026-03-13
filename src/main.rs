@@ -47,7 +47,8 @@ use kmerutils::aautils::kmeraa::{
 };
 
 use kmerutils::aautils::setsketchert as aasketch;
-use kmerutils::aautils::setsketchert::SeqSketcherAAT;
+use kmerutils::aautils::setsketchert::{HyperLogLogSketch as HyperLogLogSketchAA, SeqSketcherAAT,
+    HllSeqsThreading as HllSeqsThreadingAA};
 
 use anndists::dist::DistHamming;
 use rust_diskann::{DiskANN, DiskAnnParams};
@@ -386,7 +387,7 @@ fn sketch_with_kmer_dispatch_u16(
     if kmer_size <= 14 {
         let kmer_hash_fn = make_xxh3_canonical_kmer_hash_fn::<Kmer32bit>(hash_seed);
 
-        if vector_alg == "s" {
+        if vector_alg == "setsketch" {
             let setsketch_params = SetSketchParams::default();
             let hll_seq_threading = HllSeqsThreading::new(threads, threads);
             let sketcher = HyperLogLogSketch::<Kmer32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
@@ -409,7 +410,7 @@ fn sketch_with_kmer_dispatch_u16(
     } else if kmer_size == 16 {
         let kmer_hash_fn = make_xxh3_canonical_kmer_hash_fn::<Kmer16b32bit>(hash_seed);
 
-        if vector_alg == "s" {
+        if vector_alg == "setsketch" {
             let setsketch_params = SetSketchParams::default();
             let hll_seq_threading = HllSeqsThreading::new(threads, threads);
             let sketcher = HyperLogLogSketch::<Kmer16b32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
@@ -431,7 +432,7 @@ fn sketch_with_kmer_dispatch_u16(
     } else if kmer_size <= 32 {
         let kmer_hash_fn = make_xxh3_canonical_kmer_hash_fn::<Kmer64bit>(hash_seed);
 
-        if vector_alg == "s" {
+        if vector_alg == "setsketch" {
             let setsketch_params = SetSketchParams::default();
             let hll_seq_threading = HllSeqsThreading::new(threads, threads);
             let sketcher = HyperLogLogSketch::<Kmer64bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
@@ -461,6 +462,8 @@ fn sketch_with_kmer_dispatch_u16(
 fn sketch_aa_with_kmer_dispatch_u16(
     paths: &[String],
     kmer_size: usize,
+    vector_alg: &String,
+    threads: usize,
     sketch_size: usize,
     densification: usize, // 0 optdens, 1 revoptdens
     hash_seed: u64,
@@ -474,34 +477,52 @@ fn sketch_aa_with_kmer_dispatch_u16(
 
     if kmer_size <= 6 {
         let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA32bit>(hash_seed);
-
-        match densification {
-            0 => {
-                let sketcher = aasketch::OptDensHashSketch::<KmerAA32bit, f32>::new(&sketch_args);
-                sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
-            }
-            1 => {
-                let sketcher =
-                    aasketch::RevOptDensHashSketch::<KmerAA32bit, f32>::new(&sketch_args);
-                sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
-            }
-            _ => panic!("densification must be 0 or 1"),
+        if vector_alg == "setsketch" {
+            let setsketch_params = SetSketchParams::default();
+            let hll_seq_threading = HllSeqsThreadingAA::new(threads, threads);
+            let sketcher: HyperLogLogSketchAA<KmerAA32bit, u16> = HyperLogLogSketchAA::<KmerAA32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
+            sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
         }
+        else {
+            match densification {
+                0 => {
+                    let sketcher = aasketch::OptDensHashSketch::<KmerAA32bit, f32>::new(&sketch_args);
+                    sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
+                }
+                1 => {
+                    let sketcher =
+                        aasketch::RevOptDensHashSketch::<KmerAA32bit, f32>::new(&sketch_args);
+                    sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
+                }
+                _ => panic!("densification must be 0 or 1"),
+            }
+        }
+        
     } else if kmer_size <= 12 {
         let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA64bit>(hash_seed);
-
-        match densification {
-            0 => {
-                let sketcher = aasketch::OptDensHashSketch::<KmerAA64bit, f32>::new(&sketch_args);
-                sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
-            }
-            1 => {
-                let sketcher =
-                    aasketch::RevOptDensHashSketch::<KmerAA64bit, f32>::new(&sketch_args);
-                sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
-            }
-            _ => panic!("densification must be 0 or 1"),
+        
+        if vector_alg == "setsketch" {
+            let setsketch_params = SetSketchParams::default();
+            let hll_seq_threading = HllSeqsThreadingAA::new(threads, threads);
+            //let sketcher: HyperLogLogSketch<Kmer16b32bit, u16> = HyperLogLogSketch::<Kmer16b32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
+            let sketcher: HyperLogLogSketchAA<KmerAA64bit, u16> = HyperLogLogSketchAA::<KmerAA64bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
+            sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
         }
+        else {
+            match densification {
+                0 => {
+                    let sketcher = aasketch::OptDensHashSketch::<KmerAA64bit, f32>::new(&sketch_args);
+                    sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
+                }
+                1 => {
+                    let sketcher =
+                        aasketch::RevOptDensHashSketch::<KmerAA64bit, f32>::new(&sketch_args);
+                    sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
+                }
+                _ => panic!("densification must be 0 or 1"),
+            }
+        }
+        
     } else {
         panic!("kmer_size for amino acids must be <= 12");
     }
@@ -632,8 +653,8 @@ fn main() {
                         .long("vector_representation")
                         .short('v')
                         .help("Minhash (m) or Set sketch (s) representation")
-                        .value_parser(["s", "m"])
-                        .default_value("m")
+                        .value_parser(["setsketch", "minhash"])
+                        .default_value("minhash")
                         .action(ArgAction::Set),
                 )
                 .arg(
@@ -781,7 +802,8 @@ fn main() {
 
             let ref_genomes = read_list_file(&reference_list);
             eprintln!(
-                "Building index for {} reference genomes (seq_type={}, vector_representation = {}, k={}, sketch_size={}, dens={}, seed={}, passes={}, extra_seeds={})",
+                "Building index for {} reference genomes (seq_type={}, vector_representation = {}, k={}, sketch_size={}, 
+                dens={} (ignore for set sketch), seed={}, passes={}, extra_seeds={})",
                 ref_genomes.len(),
                 seq_type,
                 vector_alg,
@@ -811,6 +833,8 @@ fn main() {
                 "aa" => sketch_aa_with_kmer_dispatch_u16(
                     &ref_genomes,
                     kmer_size,
+                    &vector_alg,
+                    threads,
                     sketch_size,
                     dens,
                     hash_seed,
@@ -953,6 +977,8 @@ fn main() {
                 "aa" => sketch_aa_with_kmer_dispatch_u16(
                     &query_genomes,
                     pp.kmer_size,
+                    &pp.vector_alg, 
+                    threads,
                     pp.sketch_size,
                     pp.densification,
                     pp.hash_seed,

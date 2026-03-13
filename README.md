@@ -1,5 +1,5 @@
 # Granne: Graph-based Approximate Nearest Neighbor using On-disk indexes for Rapid and Scalable Genome Search
-Granne (***GR***aph-based ***A***pproximate ***N***earest ***NE***ighbor, it means neighbor in Swedish) is a lightning-fast and space-efficient genome nearest neighbor search index based on [DiskANN](https://proceedings.neurips.cc/paper_files/paper/2019/hash/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Abstract.html) and [b-bit One Permutation MinHash](https://proceedings.neurips.cc/paper/2012/hash/eaa32c96f620053cf442ad32258076b9-Abstract.html).
+Granne (***GR***aph-based ***A***pproximate ***N***earest ***NE***ighbor, it means neighbor in Swedish) is a lightning-fast and space-efficient genome nearest neighbor search index based on [DiskANN](https://proceedings.neurips.cc/paper_files/paper/2019/hash/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Abstract.html), [b-bit One Permutation MinHash](https://proceedings.neurips.cc/paper/2012/hash/eaa32c96f620053cf442ad32258076b9-Abstract.html), and [SetSketch](https://dl.acm.org/doi/abs/10.14778/3476249.3476276)
 
 
 
@@ -19,7 +19,7 @@ $ granne -h
 
 lightning-fast and space-efficient genome search index based on DiskANN and b-bit One Permutation MinHash
 
-Usage: sake <COMMAND>
+Usage: granne <COMMAND>
 
 Commands:
   todiskann  Build DiskANN index from genomes, genomes will be sketched first
