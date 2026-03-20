@@ -384,12 +384,18 @@ fn sketch_with_kmer_dispatch_u16(
         );
     }
 
+    // for HllSeqsThreading (setsketch only)
+    let nb_cpus = num_cpus::get();
+    let nb_iter_threads = ((nb_cpus.max(4) - 4) / threads).max(1);
+    let mut setsketch_params = SetSketchParams::default();
+    setsketch_params.set_m(sketch_size);
+
     if kmer_size <= 14 {
         let kmer_hash_fn = make_xxh3_canonical_kmer_hash_fn::<Kmer32bit>(hash_seed);
 
         if vector_alg == "setsketch" {
-            let setsketch_params = SetSketchParams::default();
-            let hll_seq_threading = HllSeqsThreading::new(threads, threads);
+            
+            let hll_seq_threading = HllSeqsThreading::new(nb_iter_threads, 10_000_000);
             let sketcher = HyperLogLogSketch::<Kmer32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
             sketch_files_ordered_u16::<Kmer32bit, _, _>(paths, &sketcher, kmer_hash_fn)
         }
@@ -411,8 +417,7 @@ fn sketch_with_kmer_dispatch_u16(
         let kmer_hash_fn = make_xxh3_canonical_kmer_hash_fn::<Kmer16b32bit>(hash_seed);
 
         if vector_alg == "setsketch" {
-            let setsketch_params = SetSketchParams::default();
-            let hll_seq_threading = HllSeqsThreading::new(threads, threads);
+            let hll_seq_threading = HllSeqsThreading::new(nb_iter_threads, 10_000_000);
             let sketcher = HyperLogLogSketch::<Kmer16b32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
             sketch_files_ordered_u16::<Kmer16b32bit, _, _>(paths, &sketcher, kmer_hash_fn)
         }
@@ -433,8 +438,7 @@ fn sketch_with_kmer_dispatch_u16(
         let kmer_hash_fn = make_xxh3_canonical_kmer_hash_fn::<Kmer64bit>(hash_seed);
 
         if vector_alg == "setsketch" {
-            let setsketch_params = SetSketchParams::default();
-            let hll_seq_threading = HllSeqsThreading::new(threads, threads);
+            let hll_seq_threading = HllSeqsThreading::new(nb_iter_threads, 10_000_000);
             let sketcher = HyperLogLogSketch::<Kmer64bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
             sketch_files_ordered_u16::<Kmer64bit, _, _>(paths, &sketcher, kmer_hash_fn)
         }
@@ -486,12 +490,17 @@ fn sketch_aa_with_kmer_dispatch_u16(
             DataType::AA,
         );
     }
+
+    // for HllSeqsThreading (setsketch only)
+    let nb_cpus = num_cpus::get();
+    let nb_iter_threads = ((nb_cpus.max(4) - 4) / threads).max(1);
+    let mut setsketch_params = SetSketchParams::default();
+    setsketch_params.set_m(sketch_size);
     
     if kmer_size <= 6 {
         let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA32bit>(hash_seed);
         if vector_alg == "setsketch" {
-            let setsketch_params = SetSketchParams::default();
-            let hll_seq_threading = HllSeqsThreadingAA::new(threads, threads);
+            let hll_seq_threading = HllSeqsThreadingAA::new(nb_iter_threads, 10_000_000);
             let sketcher: HyperLogLogSketchAA<KmerAA32bit, u16> = HyperLogLogSketchAA::<KmerAA32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
             sketch_files_ordered_aa_u16::<KmerAA32bit, _, _>(paths, &sketcher, kmer_hash_fn)
         }
@@ -514,8 +523,7 @@ fn sketch_aa_with_kmer_dispatch_u16(
         let kmer_hash_fn = make_xxh3_aa_kmer_hash_fn::<KmerAA64bit>(hash_seed);
         
         if vector_alg == "setsketch" {
-            let setsketch_params = SetSketchParams::default();
-            let hll_seq_threading = HllSeqsThreadingAA::new(threads, threads);
+            let hll_seq_threading = HllSeqsThreadingAA::new(nb_iter_threads, 10_000_000);
             //let sketcher: HyperLogLogSketch<Kmer16b32bit, u16> = HyperLogLogSketch::<Kmer16b32bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
             let sketcher: HyperLogLogSketchAA<KmerAA64bit, u16> = HyperLogLogSketchAA::<KmerAA64bit, u16>::new(&sketch_args, setsketch_params, hll_seq_threading);
             sketch_files_ordered_aa_u16::<KmerAA64bit, _, _>(paths, &sketcher, kmer_hash_fn)
@@ -661,10 +669,9 @@ fn main() {
                         .action(ArgAction::Set),
                 )
                 .arg(
-                    Arg::new("vector_representation")
-                        .long("vector_representation")
-                        .short('v')
-                        .help("Minhash (m) or Set sketch (s) representation")
+                    Arg::new("algo")
+                        .long("algo")
+                        .help("Minhash or setsketch (s) representation")
                         .value_parser(["setsketch", "minhash"])
                         .default_value("minhash")
                         .action(ArgAction::Set),
@@ -789,7 +796,7 @@ fn main() {
 
             let kmer_size = *m.get_one::<usize>("kmer_size").unwrap();
             let sketch_size = *m.get_one::<usize>("sketch_size").unwrap();
-            let vector_alg = m.get_one::<String>("vector_representation").unwrap().to_string();
+            let vector_alg = m.get_one::<String>("algo").unwrap().to_string();
             
             let dens = *m.get_one::<usize>("densification").unwrap();
             
