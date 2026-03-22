@@ -386,7 +386,7 @@ fn sketch_with_kmer_dispatch_u16(
 
     // for HllSeqsThreading (setsketch only)
     let nb_cpus = num_cpus::get();
-    let nb_iter_threads = ((nb_cpus.max(4) - 4) / threads).max(1);
+    let nb_iter_threads = ((nb_cpus.max(4) - 4) / threads.max(1)).max(1);
     let mut setsketch_params = SetSketchParams::default();
     setsketch_params.set_m(sketch_size);
 
@@ -671,7 +671,7 @@ fn main() {
                 .arg(
                     Arg::new("algo")
                         .long("algo")
-                        .help("Minhash or setsketch (s) representation")
+                        .help("Minhash or setsketch representation")
                         .value_parser(["setsketch", "minhash"])
                         .default_value("minhash")
                         .action(ArgAction::Set),
