@@ -148,7 +148,8 @@ struct PrefixParams {
 
     // for function distortion
     a_distort: f32, 
-    p_distort: f32,
+    p_log: f32,
+    p_poly: usize,
 
     // hash seed (must match between build/search)
     hash_seed: u64,
@@ -746,11 +747,19 @@ fn main() {
                         .action(ArgAction::Set),
                 )
                 .arg(
-                    Arg::new("p_distort")
+                    Arg::new("p_log_distort")
                         .long("p_distort")
                         .help("p for log distortion, p > 1")
                         .default_value("1")
                         .value_parser(clap::value_parser!(f32))
+                        .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("p_poly_distort")
+                        .long("p_poly_distort")
+                        .help("p for polynomial distortion, p has to be odd and > 3 for valid usage")
+                        .default_value("1")
+                        .value_parser(clap::value_parser!(usize))
                         .action(ArgAction::Set),
                 )
         )
@@ -837,7 +846,8 @@ fn main() {
             let extra_seeds = *m.get_one::<usize>("extra_seeds").unwrap();
             let hash_seed = *m.get_one::<u64>("hash_seed").unwrap();
             let a_distort = *m.get_one::<f32>("a_distort").unwrap();
-            let p_distort = *m.get_one::<f32>("p_distort").unwrap();
+            let p_log = *m.get_one::<f32>("p_log_distort").unwrap();
+            let p_poly = *m.get_one::<usize>("p_poly_distort").unwrap();
 
             init_rayon_global(threads);
 
@@ -908,7 +918,7 @@ fn main() {
 
             let idx = DiskANN::<u16, DistHamming>::build_index_with_params(
                 &vectors_u16,
-                DistHamming::new(a_distort, p_distort),
+                DistHamming::new(a_distort, p_log, p_poly),
                 &idx_file,
                 params,
             )
@@ -938,7 +948,8 @@ fn main() {
                 sketch_elem_type: "u16".to_string(),
                 distance: "anndists::dist::DistHamming".to_string(),
                 a_distort,
-                p_distort,
+                p_log,
+                p_poly,
                 hash_seed,
             };
 
@@ -973,7 +984,8 @@ fn main() {
             }
 
             let a_distort = pp.a_distort;
-            let p_distort = pp.p_distort;
+            let p_log = pp.p_log;
+            let p_poly = pp.p_poly;
 
             // Load reference genome order (defines vector IDs)
             let ref_genomes =
@@ -982,7 +994,7 @@ fn main() {
             // TODO: FIX THIS DISTHAMMING INITIALIZATION
             // Open index
             let idx =
-                DiskANN::<u16, DistHamming>::open_index_with(&index_path(&prefix), DistHamming::new(a_distort, p_distort))
+                DiskANN::<u16, DistHamming>::open_index_with(&index_path(&prefix), DistHamming::new(a_distort, p_log, p_poly))
                     .expect("failed opening index");
 
             eprintln!(
