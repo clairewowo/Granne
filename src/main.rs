@@ -146,6 +146,10 @@ struct PrefixParams {
     sketch_elem_type: String,
     distance: String,
 
+    // for function distortion
+    a_distort: f32, 
+    p_distort: f32,
+
     // hash seed (must match between build/search)
     hash_seed: u64,
 }
@@ -493,7 +497,7 @@ fn sketch_aa_with_kmer_dispatch_u16(
 
     // for HllSeqsThreading (setsketch only)
     let nb_cpus = num_cpus::get();
-    let nb_iter_threads = ((nb_cpus.max(4) - 4) / threads).max(1);
+    let nb_iter_threads = ((nb_cpus.max(4) - 4) / threads.max(1)).max(1);
     let mut setsketch_params = SetSketchParams::default();
     setsketch_params.set_m(sketch_size);
     
@@ -732,7 +736,23 @@ fn main() {
                         .default_value("1337")
                         .value_parser(clap::value_parser!(u64))
                         .action(ArgAction::Set),
-                ),
+                )
+                .arg(
+                    Arg::new("a_distort")
+                        .long("a_distort")
+                        .help("alpha for alpha^d distortion, 0 < alpha < 1")
+                        .default_value("1")
+                        .value_parser(clap::value_parser!(f32))
+                        .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("p_distort")
+                        .long("p_distort")
+                        .help("p for log distortion, p > 1")
+                        .default_value("1")
+                        .value_parser(clap::value_parser!(f32))
+                        .action(ArgAction::Set),
+                )
         )
         .subcommand(
             Command::new("search")
@@ -816,6 +836,8 @@ fn main() {
             let passes = *m.get_one::<usize>("passes").unwrap();
             let extra_seeds = *m.get_one::<usize>("extra_seeds").unwrap();
             let hash_seed = *m.get_one::<u64>("hash_seed").unwrap();
+            let a_distort = *m.get_one::<f32>("a_distort").unwrap();
+            let p_distort = *m.get_one::<f32>("p_distort").unwrap();
 
             init_rayon_global(threads);
 
@@ -886,7 +908,7 @@ fn main() {
 
             let idx = DiskANN::<u16, DistHamming>::build_index_with_params(
                 &vectors_u16,
-                DistHamming,
+                DistHamming::new(a_distort, p_distort),
                 &idx_file,
                 params,
             )
@@ -915,6 +937,8 @@ fn main() {
                 sketch_elem_size: 2,
                 sketch_elem_type: "u16".to_string(),
                 distance: "anndists::dist::DistHamming".to_string(),
+                a_distort,
+                p_distort,
                 hash_seed,
             };
 
@@ -948,13 +972,17 @@ fn main() {
                 panic!("prefix params indicate non-u16 sketches, but this binary is fixed to u16");
             }
 
+            let a_distort = pp.a_distort;
+            let p_distort = pp.p_distort;
+
             // Load reference genome order (defines vector IDs)
             let ref_genomes =
                 read_genome_list(&genomes_path(&prefix)).expect("failed reading genomes list");
-
+            
+            // TODO: FIX THIS DISTHAMMING INITIALIZATION
             // Open index
             let idx =
-                DiskANN::<u16, DistHamming>::open_index_with(&index_path(&prefix), DistHamming)
+                DiskANN::<u16, DistHamming>::open_index_with(&index_path(&prefix), DistHamming::new(a_distort, p_distort))
                     .expect("failed opening index");
 
             eprintln!(

@@ -3,6 +3,9 @@ name = "granne"
 version = "0.2.2"
 edition = "2024"
 
+[patch.crates-io]
+anndists = { git = "https://github.com/clairewowo/anndists" }
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
@@ -20,8 +23,8 @@ num_cpus = "1.16"
 num-traits = "0.2.19"
 
 # kmerutils = { version = "0.0.14", features = ["stdsimd"]}
-kmerutils = { git = "https://github.com/jianshu93/kmerutils", features = ["stdsimd"] }
-anndists = { version = "0.1.4", features = ["stdsimd"] }
+kmerutils = { path="../kmerutils", features = ["stdsimd"] }
+anndists = { git = "https://github.com/clairewowo/anndists", features = ["stdsimd"] }
 # anndists = { git = "https://github.com/jianshu93/anndists", features = ["stdsimd"] }
 xxhash-rust = { version = "0.8", features = [ "std", "xxh3" ] }
 ## rust-diskann = { git = "https://github.com/jianshu93/rust-diskann" }
